@@ -1,16 +1,14 @@
 Flask
 Flask-Bcrypt
 transformers
-torch
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
 pandas
 google-api-python-client>=2.84.0
 google-genai
 langdetect
-accelerate
 matplotlib
-datasets
 python-dotenv
-scikit-learn
 pydantic
 pytz
 gunicorn
