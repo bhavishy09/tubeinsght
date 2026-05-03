@@ -8,3 +8,5 @@ python-dotenv
 pydantic
 pytz
 gunicorn
+psycopg2-binary
+matplotlib

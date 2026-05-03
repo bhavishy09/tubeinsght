@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}YouTube Tracker - {{ super() }}{% endblock %}
@@ -11,7 +10,7 @@
     </header>
 
     <div class="card">
-        <form method="POST" action="{{ url_for('youtube_tracker') }}" class="form-card">
+        <form id="tracker-form" class="form-card">
             <div class="form-group">
                 <label for="video_id">YouTube Video ID</label>
                 <input type="text" id="video_id" name="video_id" class="form-control" placeholder="e.g., dQw4w9WgXcQ" required value="{{ video_id or '' }}">
@@ -28,27 +27,127 @@
                 </div>
             </div>
 
-            <button type="submit" class="btn btn-primary btn-block">Start Tracking</button>
+            <button type="submit" id="start-btn" class="btn btn-primary btn-block">Start Tracking</button>
         </form>
     </div>
 
-    {% if loading %}
-    <div class="card loading-card">
+    <div id="loading-container" class="card loading-card" style="display: none;">
         <div class="spinner"></div>
-        <p>Tracking in progress... Please wait. This may take up to {{ interval * samples }} minutes.</p>
-    </div>
-    {% endif %}
-
-    {% if plots %}
-    <div class="results-container">
-        <h2 class="results-header">Tracking Results</h2>
-        {% for plot in plots %}
-        <div class="card plot-card">
-            <img src="{{ url_for('static', filename=plot) }}" alt="Video Statistics Plot">
+        <p id="loading-text">Tracking in progress... Please wait.</p>
+        <div class="progress" style="width: 100%; height: 20px; background: #e9ecef; border-radius: 5px; margin-top: 15px; overflow: hidden;">
+            <div id="progress-bar" style="width: 0%; height: 100%; background: var(--primary-color); transition: width 0.3s;"></div>
         </div>
-        {% endfor %}
     </div>
-    {% endif %}
 
+    <div id="results-container" class="results-container" style="display: none;">
+        <h2 class="results-header">Tracking Results</h2>
+        <div id="plots-container"></div>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('tracker-form');
+    const loadingContainer = document.getElementById('loading-container');
+    const loadingText = document.getElementById('loading-text');
+    const progressBar = document.getElementById('progress-bar');
+    const resultsContainer = document.getElementById('results-container');
+    const plotsContainer = document.getElementById('plots-container');
+    const startBtn = document.getElementById('start-btn');
+    
+    let isTracking = false;
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        if (isTracking) return;
+        isTracking = true;
+        
+        const videoId = document.getElementById('video_id').value;
+        const interval = parseInt(document.getElementById('interval').value);
+        const samples = parseInt(document.getElementById('samples').value);
+        
+        startBtn.disabled = true;
+        resultsContainer.style.display = 'none';
+        loadingContainer.style.display = 'block';
+        plotsContainer.innerHTML = '';
+        
+        const collectedData = [];
+        const waitMs = interval * 60 * 1000;
+        
+        for (let i = 0; i < samples; i++) {
+            loadingText.textContent = `Collecting sample ${i+1} of ${samples}...`;
+            progressBar.style.width = `${(i / samples) * 100}%`;
+            
+            try {
+                const res = await fetch(`/api/track?video_id=${encodeURIComponent(videoId)}`);
+                if (!res.ok) throw new Error('Failed to fetch data');
+                const data = await res.json();
+                collectedData.push(data);
+                
+                if (i < samples - 1) {
+                    loadingText.textContent = `Waiting for next sample (${interval} min)...`;
+                    // Create a promise to wait `waitMs` milliseconds
+                    await new Promise(resolve => setTimeout(resolve, waitMs));
+                }
+            } catch (err) {
+                console.error(err);
+                alert("An error occurred while tracking: " + err.message);
+                resetUI();
+                return;
+            }
+        }
+        
+        loadingText.textContent = 'Generating final charts...';
+        progressBar.style.width = '100%';
+        
+        try {
+            const saveRes = await fetch('/api/track/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    video_id: videoId,
+                    interval: interval,
+                    data_list: collectedData
+                })
+            });
+            
+            if (!saveRes.ok) throw new Error('Failed to generate charts');
+            const saveData = await saveRes.json();
+            
+            loadingContainer.style.display = 'none';
+            resultsContainer.style.display = 'block';
+            
+            if (saveData.plots && saveData.plots.length > 0) {
+                saveData.plots.forEach(plot => {
+                    const card = document.createElement('div');
+                    card.className = 'card plot-card';
+                    const img = document.createElement('img');
+                    img.src = `data:image/png;base64,${plot.data}`;
+                    img.alt = `${plot.type} Plot`;
+                    card.appendChild(img);
+                    plotsContainer.appendChild(card);
+                });
+            } else {
+                plotsContainer.innerHTML = '<p>Could not generate plots. Please try again.</p>';
+            }
+            
+        } catch (err) {
+            console.error(err);
+            alert("Error saving tracking data: " + err.message);
+        }
+        
+        resetUI();
+    });
+    
+    function resetUI() {
+        isTracking = false;
+        startBtn.disabled = false;
+        loadingContainer.style.display = 'none';
+        progressBar.style.width = '0%';
+    }
+});
+</script>
 {% endblock %}

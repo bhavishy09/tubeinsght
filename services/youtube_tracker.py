@@ -1,13 +1,12 @@
-
-# services/youtube_tracker.py
 import matplotlib
 matplotlib.use('Agg')
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import time
-import csv
 import os
+import io
+import base64
 from datetime import datetime
 import pytz
 import random
@@ -19,8 +18,6 @@ load_dotenv()
 
 # ---------- CONFIG / DEFAULTS ----------
 TIMEZONE = "Asia/Kolkata"
-PLOT_DIR = os.path.join("static", "images", "tracker")
-DATA_DIR = os.path.join("instance", "tracker_data")
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 # ---------------------------------------
 
@@ -77,31 +74,43 @@ def fetch_simulated_stats(video_id):
     subs = 500 + random.randint(0, 50)
     return views, likes, subs, "SIMULATED_CHANNEL"
 
-def append_row(path, ts_unix, iso, views, likes, subs):
-    """Appends a row of data to the specified CSV file."""
-    with open(path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow([ts_unix, iso,
-                         views if views is not None else "",
-                         likes if likes is not None else "",
-                         subs if subs is not None else ""])
+def get_single_sample(video_id):
+    """
+    Fetches a single snapshot of statistics for polling.
+    """
+    youtube = get_youtube_service()
+    if youtube:
+        views, likes, subs, _ = fetch_video_and_channel_stats(youtube, video_id)
+    else:
+        views, likes, subs, _ = fetch_simulated_stats(video_id)
+        
+    tz = pytz.timezone(TIMEZONE)
+    ts_unix = int(time.time())
+    iso = datetime.fromtimestamp(ts_unix, tz).isoformat()
+    
+    return {
+        "timestamp_unix": ts_unix,
+        "iso": iso,
+        "views": views,
+        "likes": likes,
+        "subscribers": subs
+    }
 
-def plot_data(csv_path, video_id, interval_min):
-    """Generates and saves plots for views, likes, and subscribers."""
-    if not os.path.exists(csv_path):
-        print(f"CSV file not found: {csv_path}")
-        return []
-
-    df = pd.read_csv(csv_path)
-    if 'iso' not in df.columns or len(df) < 2:
+def generate_plots_from_data(video_id, data_list, interval_min=1):
+    """
+    Generates base64 encoded plots from a list of data dictionaries.
+    data_list should be like: [{"iso": "...", "views": 100, "likes": 10, "subscribers": 5}, ...]
+    """
+    if not data_list or len(data_list) < 2:
         print("Not enough data to plot.")
         return []
 
+    df = pd.DataFrame(data_list)
     df['iso_dt'] = pd.to_datetime(df['iso'])
     df = df.sort_values('iso_dt')
-    df['views'] = pd.to_numeric(df['views'], errors='coerce').fillna(method='ffill')
-    df['likes'] = pd.to_numeric(df['likes'], errors='coerce').fillna(method='ffill')
-    df['subscribers'] = pd.to_numeric(df['subscribers'], errors='coerce').fillna(method='ffill')
+    df['views'] = pd.to_numeric(df['views'], errors='coerce').ffill()
+    df['likes'] = pd.to_numeric(df['likes'], errors='coerce').ffill()
+    df['subscribers'] = pd.to_numeric(df['subscribers'], errors='coerce').ffill()
 
     tz = pytz.timezone(TIMEZONE)
     locator = mdates.MinuteLocator(interval=max(1, int(interval_min / 5)))
@@ -127,14 +136,15 @@ def plot_data(csv_path, video_id, interval_min):
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
         plt.tight_layout()
 
-        plot_filename = f"{video_id}_{column}_{int(time.time())}.png"
-        plot_filepath = os.path.join(PLOT_DIR, plot_filename)
-        
+        # Save to BytesIO instead of file
+        img_buffer = io.BytesIO()
         try:
-            plt.savefig(plot_filepath)
-            plot_files.append(os.path.join('images', 'tracker', plot_filename))
+            plt.savefig(img_buffer, format='png')
+            img_buffer.seek(0)
+            base64_data = base64.b64encode(img_buffer.read()).decode('utf-8')
+            plot_files.append({"type": column, "data": base64_data})
         except Exception as e:
-            print(f"Could not save {column} plot: {e}")
+            print(f"Could not generate base64 for {column} plot: {e}")
         
         plt.close(fig)
 
@@ -142,46 +152,16 @@ def plot_data(csv_path, video_id, interval_min):
 
 def track_video_stats(video_id, interval_min=1, samples=5):
     """
-    Main function to track video stats and generate plots.
+    BACKWARDS COMPATIBILITY FUNCTION:
+    This blocks using time.sleep() and is NOT recommended for Vercel,
+    but we keep it for local testing if needed. It uses the new base64 system.
     """
-    youtube = get_youtube_service()
-    simulate = not youtube
-
-    if simulate:
-        print("Running in SIMULATED mode.")
-
-    # Create a unique CSV file for this tracking session
-    csv_filename = f"{video_id}_{int(time.time())}.csv"
-    csv_filepath = os.path.join(DATA_DIR, csv_filename)
-
-    # Ensure CSV has headers
-    with open(csv_filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp_unix", "iso", "views", "likes", "subscribers"])
-
-    tz = pytz.timezone(TIMEZONE)
-
+    data_list = []
     for i in range(samples):
-        ts_unix = int(time.time())
-        iso = datetime.fromtimestamp(ts_unix, tz).isoformat()
-
-        if simulate:
-            views, likes, subs, _ = fetch_simulated_stats(video_id)
-        else:
-            views, likes, subs, _ = fetch_video_and_channel_stats(youtube, video_id)
-        
-        append_row(csv_filepath, ts_unix, iso, views, likes, subs)
-        print(f"Sample #{i+1}/{samples} -> views: {views}, likes: {likes}, subs: {subs}")
-
+        sample = get_single_sample(video_id)
+        data_list.append(sample)
+        print(f"Sample #{i+1}/{samples} -> views: {sample['views']}, likes: {sample['likes']}, subs: {sample['subscribers']}")
         if i < samples - 1:
             time.sleep(interval_min * 60)
 
-    plot_files = plot_data(csv_filepath, video_id, interval_min)
-    
-    # Clean up the CSV file after generating plots
-    try:
-        os.remove(csv_filepath)
-    except OSError as e:
-        print(f"Error removing CSV file {csv_filepath}: {e}")
-
-    return plot_files
+    return generate_plots_from_data(video_id, data_list, interval_min)

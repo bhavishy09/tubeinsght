@@ -93,13 +93,27 @@
                     <small>{{ item.timestamp }}</small>
                     <div class="plot-images">
                         {% if item.views_plot_path %}
-                        <img src="{{ url_for('static', filename=item.views_plot_path) }}" alt="Views Plot">
+                            {% if 'images/' in item.views_plot_path %}
+                            <img src="{{ url_for('static', filename=item.views_plot_path) }}" alt="Views Plot">
+                            {% else %}
+                            <img src="data:image/png;base64,{{ item.views_plot_path }}" alt="Views Plot">
+                            {% endif %}
                         {% endif %}
+                        
                         {% if item.likes_plot_path %}
-                        <img src="{{ url_for('static', filename=item.likes_plot_path) }}" alt="Likes Plot">
+                            {% if 'images/' in item.likes_plot_path %}
+                            <img src="{{ url_for('static', filename=item.likes_plot_path) }}" alt="Likes Plot">
+                            {% else %}
+                            <img src="data:image/png;base64,{{ item.likes_plot_path }}" alt="Likes Plot">
+                            {% endif %}
                         {% endif %}
+                        
                         {% if item.subscribers_plot_path %}
-                        <img src="{{ url_for('static', filename=item.subscribers_plot_path) }}" alt="Subscribers Plot">
+                            {% if 'images/' in item.subscribers_plot_path %}
+                            <img src="{{ url_for('static', filename=item.subscribers_plot_path) }}" alt="Subscribers Plot">
+                            {% else %}
+                            <img src="data:image/png;base64,{{ item.subscribers_plot_path }}" alt="Subscribers Plot">
+                            {% endif %}
                         {% endif %}
                     </div>
                 </div>

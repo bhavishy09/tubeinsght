@@ -206,16 +206,12 @@ def youtube_tracker():
             flash('Please provide a YouTube Video ID.', 'error')
             return render_template('youtube_tracker.html')
 
-        # Render a loading state immediately
         flash('Starting to track video stats. This might take a while...', 'info')
         
-        # This is a simplified approach. For a real app, use a background worker (e.g., Celery).
-        # We are calling the function directly, which will block the request.
         try: 
-            # Pass form data to a template that shows a "loading" message
-            # This template could use JavaScript to then make an AJAX call to a separate endpoint
-            # to do the actual work and poll for results.
-            # For simplicity here, we just run it and wait.
+            # Note: This is the fallback blocking method. 
+            # For Vercel, the frontend JS handles polling via /api/track instead.
+            from services.youtube_tracker import track_video_stats
             plots = track_video_stats(video_id, interval, samples)
             if not plots:
                 flash('Could not generate any plots. The video might not exist or the API key may be invalid.', 'error')
@@ -232,6 +228,48 @@ def youtube_tracker():
             return render_template('youtube_tracker.html', video_id=video_id, interval=interval, samples=samples)
 
     return render_template('youtube_tracker.html')
+
+@app.route('/api/track', methods=['GET'])
+def api_track():
+    """API endpoint for frontend polling of YouTube stats without blocking."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    video_id = request.args.get('video_id')
+    if not video_id:
+        return jsonify({'error': 'Missing video_id'}), 400
+        
+    from services.youtube_tracker import get_single_sample
+    try:
+        sample = get_single_sample(video_id)
+        return jsonify(sample)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/track/save', methods=['POST'])
+def api_track_save():
+    """API endpoint to generate plots from polled data and save to history."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    data = request.json
+    video_id = data.get('video_id')
+    data_list = data.get('data_list', [])
+    interval = data.get('interval', 1)
+    
+    if not video_id or not data_list:
+        return jsonify({'error': 'Missing data'}), 400
+        
+    from services.youtube_tracker import generate_plots_from_data
+    try:
+        plots = generate_plots_from_data(video_id, data_list, interval)
+        if plots:
+            add_tracker_history(session['user_id'], video_id, plots)
+            return jsonify({'success': True, 'plots': plots})
+        else:
+            return jsonify({'error': 'Failed to generate plots'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/logout')
 def logout():
