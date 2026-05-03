@@ -17,8 +17,11 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
 app.register_blueprint(views, url_prefix='/')
-os.makedirs('instance', exist_ok=True)
-init_db()
+
+try:
+    init_db()
+except Exception as e:
+    print(f"Warning: Database initialization failed (expected if DATABASE_URL is missing on Vercel): {e}")
 
 
 
