@@ -68,7 +68,7 @@ When a creator asks for help:
 Remember: Your goal is to be the assistant they actually want to talk to—helpful, knowledgeable, and genuinely invested in their success.
 """
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-1.5-flash"
 
 def get_client():
     api_key = os.environ.get("GEMINI_API_KEY")
